@@ -1,0 +1,33 @@
+name: release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v3
+        with:  
+          fetch-depth: 0
+
+      - name: Sign and publish
+        env:
+          NUGET_KEY: ${{ secrets.PS_GALLERY_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERT }}
+        shell: pwsh
+        run: |
+          $certPath = Join-Path -Path $PSScriptRoot -ChildPath "code_signing.pfx"
+          Set-Content -Value $([System.Convert]::FromBase64String($env:SIGNING_CERTIFICATE)) -Path $certPath -AsByteStream
+          $cert = Import-PfxCertificate -FilePath $certPath -Password ($env:SIGNING_PASSWORD | ConvertTo-SecureString -AsPlainText -Force) -CertStoreLocation Cert:\CurrentUser\My
+          Get-ChildItem src -Recurse -Force -Filter *.ps* | Set-AuthenticodeSignature -Certificate $cert -TimestampServer 'http://timestamp.comodoca.com'
+          Copy-Item .\src\ -Recurse -Destination .\AzureApiUtils\ -Force
+          Publish-Module -Path .\AzureApiUtils\ -NuGetApiKey $env:NUGET_KEY
+
+      - run: npx changelogithub
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
