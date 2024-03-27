@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           Install-Module Az.Accounts, Az.Resources -Force
-          $config = New-PesterConfiguration -Hashtable @{ TestResult = @{ Enabled = $true }; Run = @{ Exit = $true }; CodeCoverage = @{ Enabled = $true; Path = @('src/public', 'src/private') } }
+          $config = New-PesterConfiguration -Hashtable @{ TestResult = @{ Enabled = $true }; Run = @{ Exit = $true }; CodeCoverage = @{ Enabled = $false; Path = @('src/public') } }
           Invoke-Pester -Configuration $config
 
       - name: Upload test results
@@ -58,36 +58,6 @@ jobs:
           name: Test-and-Coverage
           path: coverage.xml
 
-      - name: Update coverage in README
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          [xml]$coverage = Get-Content .\coverage.xml
-          [int]$covered = $coverage.report.counter | Where-Object type -eq 'METHOD' | select -ExpandProperty 'covered'
-          [int]$missed = $coverage.report.counter | Where-Object type -eq 'METHOD' | select -ExpandProperty 'missed'
-          [int]$sum = $covered + $missed
-          $coveredPercent = [Math]::Floor(($covered * 100 / $sum) * 100) / 100
-          $readme = Get-Content ./README.md
-          $readme = $readme | foreach-object { $_ -replace "(?<prefix>^.+https:\/\/img\.shields\.io\/badge\/coverage-)(.+)(?<suffix>%25-yellow\))$", "`${prefix}$coveredPercent`${suffix}" } 
-          $readme | Out-File ./README.md -Force -Encoding ascii
-
-      - name: Update public functions in README
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $functions = ''
-          (Import-PowerShellDataFile -Path ./src/AzureApiUtils.psd1).FunctionsToExport | % { $functions += "- $($_)`n" }
-          $readme = Get-Content .\README.md -Raw
-          $readme -replace "(?s)(?<prefix><\/summary>)(.+)(?<suffix><\/details>)", "`${prefix}`n`n$functions`n`${suffix}" | Out-File ./README.md -Force -Encoding ascii
-
-      - name: Commit updated coverage and functions
-        uses: stefanzweifel/git-auto-commit-action@v4
-        with:
-          commit_message: 'docs(readme): :memo: Updated coverage and functions'
-          commit_user_email: jdamaschke@visorian.com
-          push_options: '--force'
-          branch: main
-
       - name: Upload public help
         uses: LanceMcCarthy/Action-AzureBlobUpload@v2
         with:
@@ -95,26 +65,3 @@ jobs:
           container_name: help
           source_folder: en-us
           delete_if_exists: true
-
-      - name: Generate new tag version
-        uses: mathieudutour/github-tag-action@v6.1
-        id: tag_version
-        with:
-          github_token: ${{ secrets.AzureApiUtils_REPO }}
-          release_branches: main
-          dry_run: true
-
-      - name: Update manifest and help version
-        if: ${{ steps.tag_version.outputs.new_tag }}
-        shell: pwsh
-        env:
-          TAG_NAME: ${{ steps.tag_version.outputs.new_tag }}
-        run: |
-          $release = $env:TAG_NAME.replace('v', '')
-          $help = Get-Content ./docs/AzureApiUtils.md
-          $help = $help | foreach-object { $_ -replace '(?<prefix>^.?Help Version: )(.+)(?<suffix>)$', "`${prefix}$release`${suffix}" }
-          $help | Out-File ./docs/AzureApiUtils.md -Force -Encoding ascii
-          $manifest = Get-Content ./src/AzureApiUtils.psd1
-          $manifest = $manifest | foreach-object { $_ -replace "(?<prefix>^\s+ModuleVersion     = ')(.+)(?<suffix>')$", "`${prefix}$release`${suffix}" } 
-          $manifest | Out-File ./src/AzureApiUtils.psd1 -Force -Encoding ascii
-

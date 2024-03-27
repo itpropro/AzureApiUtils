@@ -1,76 +1,82 @@
 <#
 .SYNOPSIS
-  This function invokes a request with retry logic for rate limiting (HTTP 429 responses).
+   This function retrieves application permissions from an app in Entra ID.
 
 .DESCRIPTION
-  The Invoke-RetryRequest function sends a request using the provided parameters. 
-  If the API returns a 429 response (Too Many Requests), the function will wait and retry the request. 
-  The wait time increases exponentially with each subsequent 429 response.
+   The Get-AppPermission function uses the Microsoft Graph API to retrieve application permissions from an app in Entra ID. 
+   It requires the Microsoft.Graph.Authentication module to authenticate to the Graph API.
 
-.PARAMETER method
-  Optional. The HTTP method to use for the request. Defaults to 'get'.
+.PARAMETER tenantId
+   Optional. The ID of the tenant where the app resides.
 
-.PARAMETER uri
-  Mandatory. The URI of the endpoint to which the request will be sent.
+.PARAMETER objectId
+   Mandatory. The object ID of the app from which permissions will be retrieved. This parameter is mandatory for the 'ObjectId' parameter set.
 
-.PARAMETER headers
-  Optional. A hashtable of headers to include in the request.
+.PARAMETER appId
+   Mandatory. The application ID of the app from which permissions will be retrieved. This parameter is mandatory for the 'AppId' parameter set.
 
-.PARAMETER body
-  Optional. The body of the request, if applicable, if method is get, used as query parameter.
+.PARAMETER includeDelegatedPermissions
+   Optional. A switch parameter. If provided, the function will include delegated permissions in the output.
 
-.PARAMETER maxRetrySeconds
-  Optional. The maximum number of seconds to continue retrying the request. Defaults to 2000.
+.PARAMETER includeDelegatedPermissionClassifications
+   Optional. A switch parameter. If provided, the function will include delegated permission classifications in the output.
 
 .EXAMPLE
-  Invoke-RetryRequest -uri "https://graph.microsoft.com/beta/users" -method "get"
+   Get-AppPermission -tenantId 'your-tenant-id' -appId 'your-app-id' -includeDelegatedPermissions
+
+.EXAMPLE
+  Get-AppPermission -objectId 'your-object-id'
+
+.EXAMPLE
+  Get-AppPermission -appId 'your-app-id' -includeDelegatedPermissions -includeDelegatedPermissionClassifications
 #>
 
-function Invoke-RetryRequest {
+function Get-AppPermission {
   [CmdletBinding()]
   param (
-    [Parameter(ValueFromPipelineByPropertyName)]
+    [Parameter()]
+    [String]
+    $tenantId,
+    [Parameter(Mandatory, ValueFromPipelineByPropertyName, ValueFromPipeline, ParameterSetName = 'ObjectId')]
     [string]
-    $method = 'get',
-    [Parameter(Mandatory,
-      ValueFromPipelineByPropertyName)]
+    $objectId,
+    [Parameter(Mandatory, ValueFromPipelineByPropertyName, ValueFromPipeline, ParameterSetName = 'AppId')]
     [string]
-    $uri,
-    [Parameter(Mandatory = $false)]
-    [hashtable]
-    $headers = $null,
-    [Parameter(Mandatory = $false)]
-    [object]
-    $body = $null,
-    [Parameter(Mandatory = $false)]
-    [int]
-    $maxRetrySeconds = 2000
+    $appId,
+    [Parameter()]
+    [switch]
+    $includeDelegatedPermissions,
+    [Parameter()]
+    [switch]
+    $includeDelegatedPermissionClassifications
   )
-  Write-Verbose "Invoking retry request with uri: $uri"
-  $sleepDuration = 0
-  $retry = $false
-  do {
+  
+  Begin {
     try {
-      $retry = $false
-      Invoke-RestMethod -Method $method -Headers $headers -ContentType 'application/json' -Uri $uri -Body $body -ErrorAction Stop -Verbose:$false
+      Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     }
     catch {
-      if ($_.Exception.Response.StatusCode.value__ -ne 429) { $retry = $false; throw $_ }
-      $sleepDuration = $sleepDuration -eq 0 ? 4 : $sleepDuration * 2
-      $retry = $true
-      Write-Verbose "API returned 429, retrying in $sleepDuration seconds"
-      Start-Sleep -Seconds $sleepDuration
+      Throw "Microsoft.Graph.Authentication module cannot be loaded"
     }
-  } until (
-    -not $retry -or ($sleepDuration -ge $maxRetrySeconds)
-  )
+    if (-not (Get-MgContext)) { 
+      Write-Verbose "No MgGraph context found, executing Connect-MgGraph"
+      Connect-MgGraph
+    }
+  }
+  Process {
+    $baseUri = $appId ? "/beta/servicePrincipals(appId='$appId')" : "/beta/servicePrincipals/$objectId"
+    Invoke-GraphApiRequest -Uri "$baseUri/appRoleAssignments" | Select-Object *, @{Name = 'permissionType'; Expression = { 'applicationPermission' } }
+    if ($includeDelegatedPermissions) { Invoke-GraphApiRequest -Uri "$baseUri/oauth2PermissionGrants" | Select-Object *, @{Name = 'permissionType'; Expression = { 'delegatedPermission' } } } 
+    if ($includeDelegatedPermissionClassifications) { Invoke-GraphApiRequest -Uri "$baseUri/delegatedPermissionClassifications" | Select-Object *, @{Name = 'permissionType'; Expression = { 'delegatedPermissionClassification' } } }
+  }
+  End {}
 }
 
 # SIG # Begin signature block
 # MIImwgYJKoZIhvcNAQcCoIImszCCJq8CAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUxgBR4X2wSuXzRsNQbllZQkzy
-# 49Gggh/UMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUrhfwX8qt6i1lr5bVmT9hAbOm
+# AB6ggh/UMIIFbzCCBFegAwIBAgIQSPyTtGBVlI02p8mKidaUFjANBgkqhkiG9w0B
 # AQwFADB7MQswCQYDVQQGEwJHQjEbMBkGA1UECAwSR3JlYXRlciBNYW5jaGVzdGVy
 # MRAwDgYDVQQHDAdTYWxmb3JkMRowGAYDVQQKDBFDb21vZG8gQ0EgTGltaXRlZDEh
 # MB8GA1UEAwwYQUFBIENlcnRpZmljYXRlIFNlcnZpY2VzMB4XDTIxMDUyNTAwMDAw
@@ -244,34 +250,34 @@ function Invoke-RetryRequest {
 # MSswKQYDVQQDEyJTZWN0aWdvIFB1YmxpYyBDb2RlIFNpZ25pbmcgQ0EgUjM2AhBI
 # sSsp3sP4rhuRF473RoVYMAkGBSsOAwIaBQCgeDAYBgorBgEEAYI3AgEMMQowCKAC
 # gAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQBgjcCAQsx
-# DjAMBgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBRLBGvo8VX+TUaYaI+LKqgM
-# MbSb6zANBgkqhkiG9w0BAQEFAASCAgCG5h40xRzBgZhY4mZiaVAa4SKtGvDSQlCD
-# iPTanyT5P2lWYvZKWVI1wNUekLayJknhGr7bsjz1ykGUS6w9bGPz2x9JiDVn2i0q
-# wB2atJIzKXo5AYuID+mf9xIhvWGD2yL3x4UE4s2EQS0tjB88z0en45eEb1vh/pxy
-# dJ9zJtZ4aaDCEHqs68koPD/c841/jpBAlufP5M3zfR6v5eOzi9gcfWKomB+7v90x
-# PRq/b4vSt9E/1ykQfc+hLG6axACFpZcMJWqpgi/9SQDKZJFMxBWmQsb2KH1s5dIy
-# 4nr3MPNa1iyQ7eg5i3o4XOwwImU0OiV7ZKTbXrz4lC2ZzAfRwgX6gl7QbGEURIix
-# ea+q1eM3+xVV84Uokpdkshkz2ZURe700R23cjHsAepIw33DAc3qwKc5gcAH9Esse
-# AKmjw+tzrBqmFzN7KZqbF8DBuTMbTzgNzw5HO7cvzgxHV60ns99sU5ksFmQfWn2c
-# /yHeiZj35nf20KkVwiEU2IIzndpBIllRRQ8syn+B1oVIauWWUXgMHHrKvnfQ4S2a
-# jTVqioOUdmDXOy4aurpCZEeAP1Jd1OpvInnxvYjDLTYl5gZCXzfJz7mFkAXnk5C6
-# kkAIPXiht47BJTXOaabwe+Qob/hvpJdPMDGEvfTy1I1LKDe0Cg+rae1Fj8c3lMF1
-# ypYQlv3/AqGCA0swggNHBgkqhkiG9w0BCQYxggM4MIIDNAIBATCBkTB9MQswCQYD
+# DjAMBgorBgEEAYI3AgEVMCMGCSqGSIb3DQEJBDEWBBRBbE79PT84AeRZeyEKkPGC
+# C0NDfDANBgkqhkiG9w0BAQEFAASCAgCpxBIJY2mjBme0q6ZMZ9OVk711R0PyGRXs
+# 2yYPIlXZJIFm9cNWJAEdQ0wodJ2WdUTf8uksKvMh+1OvWXL483IZZnr8Cllr5rJ9
+# VHIey92gt9mSZSrBKj2nm30EJ/hCdVlCk8gUmhZDApDLmFUesFn4jWdJyNumkdj6
+# 66126s69cQMUAca3k59w7O/zKCc1rxxcr3uEgBvvKGK/Z7bF+R3ZSBrZq3cYU9lT
+# etsQQb3JqMTpf6dlPMY+sVd7zUBX7K9w0yL7KOKpulz1GGt2Sipiz6kCh3bvrgpd
+# YOTyN9lMtey79Jhz8oym+iigxpspOBFH5p220WiqzKVb+m5tx71a8pGN2IBQM3Gc
+# qjDXDWmdClCfJqyQnr82+FVgkR8Sg0aQmnD9/abeBXYVccXo+ZOtha7rqKFcFypv
+# Z3MQ20J5rNBHkQ/gfLKvJFLLSeh8snMD106112z6iSWvHjvyTJiTMegNMF1g9Azn
+# 26kvPzkXNb5L6AWO1jvLcM1jHOMCGz4I6Nt6ur9aotoUxc1u/ZMUkNRCr2tfewyu
+# mhJqkzEDc8hNS/4PLvbkiX7lTxpDTSL6xAslbscoLB/ZziYgBMO6EilNSyzr/1DZ
+# uCexveoi8nickgB+fD0vQqAEO838AJxnPQnVMtf/3NQdoTIvBSvDV/SMiVC23Vc5
+# +3C78yFgDqGCA0swggNHBgkqhkiG9w0BCQYxggM4MIIDNAIBATCBkTB9MQswCQYD
 # VQQGEwJHQjEbMBkGA1UECBMSR3JlYXRlciBNYW5jaGVzdGVyMRAwDgYDVQQHEwdT
 # YWxmb3JkMRgwFgYDVQQKEw9TZWN0aWdvIExpbWl0ZWQxJTAjBgNVBAMTHFNlY3Rp
 # Z28gUlNBIFRpbWUgU3RhbXBpbmcgQ0ECEDlMJeF8oG0nqGXiO9kdItQwDQYJYIZI
 # AWUDBAICBQCgeTAYBgkqhkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJ
-# BTEPFw0yNDAzMjcyMjU3NDBaMD8GCSqGSIb3DQEJBDEyBDBMFUeXwl49xtv6eFWB
-# 1bNlq/Gg5Bs4+CX/44Cc8BN06jEhrKa5RWdeYPEEegIlZ0owDQYJKoZIhvcNAQEB
-# BQAEggIAfxEs01Ry+M9RpML8wMABd4hZGY5gyiO9FTQWX2FwiEQ376od2ABuAYnX
-# SxCb+e7N71fD4SFMulK2TwApsYBpS7u98Yd8XGbVpVirvKRYtS0nj4YclHXCOaUI
-# Hg+/NE6UcmNT36vrC9osmjJcdKPN6ly64LbqFXwZuQCabTK/pzSqUzehvy+vsGDp
-# Rol7fXW+AmdfEg0Xb6wqPWvBGUarJJcXiiWbPAPd3WxCadpsrFg5R69T/TwaHv3C
-# JRuf2b9ZSwssx4+Fn4tP8ww60pIFucbtQiqoeZCQa/VoxVki14ETsS0aYXKHDz6z
-# sJRHhUJxYxRN0QBZkVt81fEjZOuMogX8WSgRDHNi7uiDeujhaxSXXHsZg5unl8x/
-# IDm40utGTW4qnBDHI+MYUtf0VG9O8KWtM3Quz8MNDlpH6C0l7XV7O5VeFNX3mL6n
-# +AiVzyoZSU71jX3AHf1oXg/OKUcSr6+iXGWd9Wi9gF3ORM+kGSq2tjvhuY5Dzp8H
-# hOZ/47uAV5ITfLipGagg2cgkkTSebFU48+3Z1wzhE+EziZWmjUBOY10nx6zC9re5
-# ztAV9NXPNEGhDGw4IWMaiNraBeuSKwt6pujFnmVmbTGMtpbLGLzKd/kBA4FBDPEP
-# CyuH8mtvxS0heRZ5GkSEJ3gHIvEWdCgmsHbWZY8r7vu6WCcFhHY=
+# BTEPFw0yNDAzMjcyMjU3MjhaMD8GCSqGSIb3DQEJBDEyBDDWmKnHmoGTDpiU33x1
+# 4PYW9pc4QtxI6y52bDgtbmLYkx8BWeYuLTGP9OpU11Sc4jkwDQYJKoZIhvcNAQEB
+# BQAEggIAQHV4IT0id1vVQO3G2feww6+zc0TSeEyny12Abvv5FJrWBm3LvgfuKZII
+# dTsqMkwhuyOZQrlzi8Hj+JWSPHdelVwIOsElBuKZhhn2gmbQ1pjabnM7poo0742P
+# VDO0yPH2iVVtUW8U2cPfrdYztf0JXO8Q9DNBMyjiqFfQOmFlcMHjqHUTiO3LL34l
+# DpXPbnSVX8rWWqTC/piO+iLCcwu/RqtuV2FqQYsL19MfbyE4RaiA7gMwsW13VcuZ
+# BF/fXlmGfZ8+tYLIYwbAIM8uBvuz5OKB977Y7zVtInE9npyhRfYW3CpbivTLm0Km
+# jqGHal1YXu7gdt0UL633xRfujeHxnTNMQ6fKoVMWabUYn9zC2+ApiUGVBOIkxYC1
+# vFPMsjTcTxSKC/s+pDZ8OWr7F/GI9apV4fXegdohy/OCFGdwufTfeDzEnnameN/R
+# 6P/DZR117jIAoqpdPA8PjMNwkHNtr7wFVhm+qFtU/F3bkrMh/iJRbsBC/gyUCT/5
+# Mvp+ImBbQVoFzIgueFBuHVlnbZNhYeXIgSMUggH+iSru5fEtgBQ4dFmIwfIzChfU
+# SjAida+NYTkqAReZXdr9K7OrSOrWpQOI8AV0kwwV1sfY6BVCwunro/xTIRvwrM33
+# Q4UVSWhin7y+v6FISHeh1ID2o90yeDdjleJy5HA19b43I75n4Zc=
 # SIG # End signature block
