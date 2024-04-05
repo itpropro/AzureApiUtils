@@ -1,9 +1,14 @@
 # AzureApiUtils module
 
-![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/itpropro/AzureApiUtils/ci.yml?logo=github&label=CI%2FCD&labelColor=181818)
 ![PowerShell Gallery Version (including pre-releases)](https://img.shields.io/powershellgallery/v/AzureApiUtils?labelColor=181818&color=4578d2&label=PS%20Gallery%20Version)
 ![PowerShell Gallery](https://img.shields.io/powershellgallery/dt/AzureApiUtils?labelColor=181818&color=4578d2&label=PS%20Gallery%20Downloads)
-![Code Coverage](https://img.shields.io/badge/coverage-97.35%25-yellow?labelColor=181818&color=4578d2&label=Test%20Coverage)
+![Code Coverage](https://img.shields.io/badge/coverage-96.15%25-yellow?labelColor=181818&color=4578d2&label=Test%20Coverage)
+
+## Features
+
+- ✨ Automatic retry and pagination handling
+- 💪 Easy interactions with Azure and Graph APIs
+- 🚀 Simplified permission management for Managed Identities
 
 ## Installation
 
@@ -61,4 +66,3 @@ See [Contributing Guide](https://github.com/itpropro/AzureApiUtils/blob/main/CON
 Made with :heart:
 
 Published under [MIT License](./LICENCE).
-
